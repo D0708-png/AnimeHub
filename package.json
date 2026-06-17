@@ -1,0 +1,42 @@
+{
+  "name": "animehub-official-watch",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Next.js anime discovery app with Netlify auth, shared comments, and supported source players.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint . --max-warnings=0",
+    "youtube:import": "node scripts/import-youtube-catalog.mjs --source all",
+    "youtube:import:muse": "node scripts/import-youtube-catalog.mjs --source muse-indonesia",
+    "youtube:import:anione": "node scripts/import-youtube-catalog.mjs --source ani-one-indonesia",
+    "youtube:import:dry": "node scripts/import-youtube-catalog.mjs --source all --dry-run",
+    "youtube:list": "node scripts/import-youtube-catalog.mjs --source all --list-playlists",
+    "youtube:list-playlists": "node scripts/import-youtube-catalog.mjs --source all --list-playlists",
+    "youtube:import:enriched": "node scripts/import-youtube-catalog.mjs --source all --enrich-metadata"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^10.7.9",
+    "bcryptjs": "^3.0.3",
+    "clsx": "^2.1.1",
+    "gsap": "^3.12.5",
+    "lucide-react": "^0.468.0",
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.2.0",
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.1",
+    "@types/react-dom": "^19.0.2",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9.17.0",
+    "eslint-config-next": "^15.0.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.2"
+  }
+}

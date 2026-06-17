@@ -1,0 +1,19 @@
+<svg width="720" height="960" viewBox="0 0 720 960" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">AnimeHub poster placeholder</title>
+  <desc id="desc">A local poster placeholder for replaceable anime catalog artwork.</desc>
+  <rect width="720" height="960" fill="#101114"/>
+  <rect x="40" y="40" width="640" height="880" rx="28" fill="url(#paint0_linear)"/>
+  <path d="M96 742C216 626 284 648 360 724C442 806 520 802 624 700V864H96V742Z" fill="#101114" fill-opacity=".34"/>
+  <circle cx="552" cy="176" r="78" fill="#F3C846" fill-opacity=".9"/>
+  <rect x="96" y="662" width="420" height="28" rx="14" fill="white" fill-opacity=".86"/>
+  <rect x="96" y="712" width="300" height="20" rx="10" fill="white" fill-opacity=".58"/>
+  <text x="96" y="172" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="54" font-weight="800">AnimeHub</text>
+  <text x="96" y="232" fill="white" fill-opacity=".78" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700">Local poster placeholder</text>
+  <defs>
+    <linearGradient id="paint0_linear" x1="72" y1="80" x2="646" y2="898" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF4D6D"/>
+      <stop offset=".48" stop-color="#18B7BE"/>
+      <stop offset="1" stop-color="#6D5DFC"/>
+    </linearGradient>
+  </defs>
+</svg>
