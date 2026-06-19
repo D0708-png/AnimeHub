@@ -47,11 +47,12 @@ export function YouTubeEmbed({
     <section className="overflow-hidden rounded-3xl border border-white/10 bg-night shadow-soft">
       <div className="aspect-video">
         <iframe
-          className="h-full w-full"
+          className="h-full w-full border-0 bg-black"
           src={embedUrl}
           title={title}
-          allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
           allowFullScreen
+          referrerPolicy="strict-origin-when-cross-origin"
         />
       </div>
       <div className="flex flex-col gap-3 border-t border-white/10 p-4 text-sm text-white/72 sm:flex-row sm:items-center sm:justify-between">

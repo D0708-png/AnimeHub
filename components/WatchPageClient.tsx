@@ -85,7 +85,7 @@ export function WatchPageClient({
 
       <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="space-y-5">
-          <div className="watch-reveal">
+          <div className="w-full">
             <YouTubePlayer
               title={`${anime.title} episode ${episode.number}: ${episode.title}`}
               youtubeVideoId={episode.youtubeVideoId}
@@ -99,8 +99,8 @@ export function WatchPageClient({
             />
           </div>
 
-          <div className="watch-reveal glass-card p-4 text-sm leading-6 text-white/70">
-            Watch through the supported source player. Availability may vary by source and region.
+          <div className="watch-reveal glass-card p-4 text-sm leading-6 text-token-muted">
+            Watch through the source player. Availability may vary by source and region.
           </div>
 
           <WatchSession anime={anime} episode={episode} />

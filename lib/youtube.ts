@@ -15,14 +15,28 @@ export function isEmbeddableOfficialYouTubeId(
   return isValidYouTubeId(videoId) && !isPlaceholderYouTubeId(videoId);
 }
 
-export function buildYouTubeEmbedUrl(
-  videoId: string | undefined,
-  playlistId?: string
-) {
-  const usablePlaylistId =
-    playlistId && !playlistId.includes("REPLACE") ? playlistId : undefined;
+function getUsablePlaylistId(playlistId: string | undefined) {
+  const cleanPlaylistId = playlistId?.trim();
 
-  if (!isEmbeddableOfficialYouTubeId(videoId)) {
+  return cleanPlaylistId && !cleanPlaylistId.includes("REPLACE")
+    ? cleanPlaylistId
+    : undefined;
+}
+
+export function createYouTubeEmbedUrl({
+  youtubeVideoId,
+  youtubePlaylistId
+}: {
+  youtubeVideoId?: string;
+  youtubePlaylistId?: string;
+}) {
+  const usablePlaylistId =
+    getUsablePlaylistId(youtubePlaylistId);
+  const usableVideoId = isEmbeddableOfficialYouTubeId(youtubeVideoId)
+    ? youtubeVideoId
+    : undefined;
+
+  if (!usableVideoId) {
     if (usablePlaylistId) {
       return `https://www.youtube.com/embed/videoseries?list=${encodeURIComponent(
         usablePlaylistId
@@ -40,12 +54,23 @@ export function buildYouTubeEmbedUrl(
 
   const query = params.toString();
 
-  return `https://www.youtube.com/embed/${videoId}${query ? `?${query}` : ""}`;
+  return `https://www.youtube.com/embed/${encodeURIComponent(usableVideoId)}${
+    query ? `?${query}` : ""
+  }`;
+}
+
+export function buildYouTubeEmbedUrl(
+  videoId: string | undefined,
+  playlistId?: string
+) {
+  return createYouTubeEmbedUrl({
+    youtubeVideoId: videoId,
+    youtubePlaylistId: playlistId
+  });
 }
 
 export function buildYouTubeWatchUrl(videoId: string | undefined, playlistId?: string) {
-  const usablePlaylistId =
-    playlistId && !playlistId.includes("REPLACE") ? playlistId : undefined;
+  const usablePlaylistId = getUsablePlaylistId(playlistId);
 
   if (!isEmbeddableOfficialYouTubeId(videoId)) {
     if (usablePlaylistId) {
