@@ -36,6 +36,15 @@ export interface ServerCatalogOverrides {
   createdEpisodes: Record<string, AnimeEpisode[]>;
 }
 
+export type BulkAnimeAction =
+  | "delete"
+  | "hide"
+  | "unhide"
+  | "markFeatured"
+  | "removeFeatured"
+  | "markTrending"
+  | "removeTrending";
+
 export type AnimeSourceKey = "muse-indonesia" | "ani-one-indonesia" | "manual" | "other";
 
 export interface DuplicateGroup<T> {

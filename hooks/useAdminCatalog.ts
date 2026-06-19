@@ -6,6 +6,7 @@ import {
   createEmptyServerCatalogOverrides,
   mergeCatalogWithServerOverrides,
   normalizeServerCatalogOverrides,
+  type BulkAnimeAction,
   type ServerCatalogOverrides
 } from "@/lib/catalog";
 import type { Anime, AnimeEpisode } from "@/types/anime";
@@ -15,7 +16,8 @@ function cloneAnime(anime: Anime): Anime {
 }
 
 function stripAnimeEpisodes(anime: Anime): Partial<Anime> {
-  const { episodes: _episodes, ...animeFields } = anime;
+  const animeFields = { ...anime } as Partial<Anime>;
+  delete animeFields.episodes;
   return animeFields;
 }
 
@@ -81,7 +83,12 @@ export function useAdminCatalog(baseCatalog: Anime[]) {
     ) => {
       try {
         const overrides = await request;
-        setServerState(overrides);
+        try {
+          const refreshedOverrides = await fetchOverrides("/api/admin/catalog-overrides");
+          setServerState(refreshedOverrides);
+        } catch {
+          setServerState(overrides);
+        }
         showToast({ message: toastMessage, tone });
         return true;
       } catch (error) {
@@ -136,6 +143,20 @@ export function useAdminCatalog(baseCatalog: Anime[]) {
         }),
         "Anime deleted",
         "info"
+      );
+    },
+    [applyMutation]
+  );
+
+  const bulkAnimeAction = useCallback(
+    async (action: BulkAnimeAction, animeIds: string[], toastMessage = "Bulk action applied") => {
+      return applyMutation(
+        fetchOverrides("/api/admin/anime/bulk", {
+          method: "POST",
+          body: JSON.stringify({ action, animeIds })
+        }),
+        toastMessage,
+        action === "delete" ? "info" : "success"
       );
     },
     [applyMutation]
@@ -238,6 +259,7 @@ export function useAdminCatalog(baseCatalog: Anime[]) {
     upsertAnime,
     updateAnime,
     deleteAnime,
+    bulkAnimeAction,
     restoreAnime,
     updateEpisode,
     addEpisode,

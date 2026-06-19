@@ -20,7 +20,7 @@ import { ChangeEvent, useMemo, useRef, useState } from "react";
 import { SafeImage } from "@/components/SafeImage";
 import { showToast } from "@/components/ToastProvider";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import type { AnimeSourceKey } from "@/lib/catalog";
+import type { AnimeSourceKey, BulkAnimeAction } from "@/lib/catalog";
 import { getAnimeSourceKey, getAnimeSourceLabel } from "@/lib/catalog";
 import type { Anime } from "@/types/anime";
 import {
@@ -68,6 +68,7 @@ export function AdminAnimeListPage() {
     hasHydrated,
     updateAnime,
     deleteAnime,
+    bulkAnimeAction,
     exportCatalog,
     replaceCatalog,
     resetAdminCatalog,
@@ -84,6 +85,7 @@ export function AdminAnimeListPage() {
   const [featuredFilter, setFeaturedFilter] = useState("All");
   const [trendingFilter, setTrendingFilter] = useState("All");
   const [reviewFilter, setReviewFilter] = useState("All");
+  const [selectedAnimeIds, setSelectedAnimeIds] = useState<string[]>([]);
 
   const summary = useMemo(
     () => ({
@@ -142,6 +144,13 @@ export function AdminAnimeListPage() {
     reviewFilter
   ]);
 
+  const selectedSet = useMemo(() => new Set(selectedAnimeIds), [selectedAnimeIds]);
+  const visibleAnimeIds = useMemo(() => filteredAnime.map((anime) => anime.id), [filteredAnime]);
+  const selectedCount = selectedAnimeIds.length;
+  const visibleSelectedCount = visibleAnimeIds.filter((animeId) => selectedSet.has(animeId)).length;
+  const allVisibleSelected =
+    visibleAnimeIds.length > 0 && visibleSelectedCount === visibleAnimeIds.length;
+
   function downloadExport() {
     const blob = new Blob([exportCatalog()], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -176,6 +185,48 @@ export function AdminAnimeListPage() {
       });
     } finally {
       event.target.value = "";
+    }
+  }
+
+  function toggleAnimeSelection(animeId: string, checked: boolean) {
+    setSelectedAnimeIds((currentIds) => {
+      if (checked) {
+        return Array.from(new Set([...currentIds, animeId]));
+      }
+
+      return currentIds.filter((currentId) => currentId !== animeId);
+    });
+  }
+
+  function toggleAllVisible(checked: boolean) {
+    setSelectedAnimeIds((currentIds) => {
+      const visibleSet = new Set(visibleAnimeIds);
+
+      if (checked) {
+        return Array.from(new Set([...currentIds, ...visibleAnimeIds]));
+      }
+
+      return currentIds.filter((animeId) => !visibleSet.has(animeId));
+    });
+  }
+
+  async function runBulkAction(
+    action: BulkAnimeAction,
+    toastMessage: string,
+    confirmMessage?: string
+  ) {
+    if (selectedCount === 0) {
+      return;
+    }
+
+    if (confirmMessage && !window.confirm(confirmMessage)) {
+      return;
+    }
+
+    const didSave = await bulkAnimeAction(action, selectedAnimeIds, toastMessage);
+
+    if (didSave) {
+      setSelectedAnimeIds([]);
     }
   }
 
@@ -329,13 +380,120 @@ export function AdminAnimeListPage() {
         </div>
       </div>
 
+      <div className="glass-card p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="inline-flex items-center gap-2 text-sm font-bold text-token-foreground">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-token-border bg-token-card text-token-primary focus:ring-2 focus:ring-token-primary"
+                checked={allVisibleSelected}
+                disabled={visibleAnimeIds.length === 0}
+                onChange={(event) => toggleAllVisible(event.target.checked)}
+              />
+              Select All Visible
+            </label>
+            <span className="chip">{selectedCount} selected</span>
+            {selectedCount > 0 ? (
+              <button
+                type="button"
+                className="button-ghost px-4 py-2 text-xs"
+                onClick={() => setSelectedAnimeIds([])}
+              >
+                Clear Selection
+              </button>
+            ) : null}
+          </div>
+
+          {selectedCount > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="button-secondary px-4 py-2 text-xs"
+                onClick={() =>
+                  runBulkAction(
+                    "hide",
+                    `${selectedCount} anime hidden`,
+                    `Hide ${selectedCount} selected anime from public pages?`
+                  )
+                }
+              >
+                <EyeOff className="h-4 w-4" aria-hidden="true" />
+                Hide Selected
+              </button>
+              <button
+                type="button"
+                className="button-secondary px-4 py-2 text-xs"
+                onClick={() => runBulkAction("unhide", `${selectedCount} anime unhidden`)}
+              >
+                <Eye className="h-4 w-4" aria-hidden="true" />
+                Unhide Selected
+              </button>
+              <button
+                type="button"
+                className="button-secondary px-4 py-2 text-xs"
+                onClick={() => runBulkAction("markFeatured", `${selectedCount} anime marked featured`)}
+              >
+                <Star className="h-4 w-4" aria-hidden="true" />
+                Mark Featured
+              </button>
+              <button
+                type="button"
+                className="button-secondary px-4 py-2 text-xs"
+                onClick={() => runBulkAction("removeFeatured", `${selectedCount} anime removed from featured`)}
+              >
+                Remove Featured
+              </button>
+              <button
+                type="button"
+                className="button-secondary px-4 py-2 text-xs"
+                onClick={() => runBulkAction("markTrending", `${selectedCount} anime marked trending`)}
+              >
+                <Wand2 className="h-4 w-4" aria-hidden="true" />
+                Mark Trending
+              </button>
+              <button
+                type="button"
+                className="button-secondary px-4 py-2 text-xs"
+                onClick={() => runBulkAction("removeTrending", `${selectedCount} anime removed from trending`)}
+              >
+                Remove Trending
+              </button>
+              <button
+                type="button"
+                className="button-danger px-4 py-2 text-xs"
+                onClick={() =>
+                  runBulkAction(
+                    "delete",
+                    `${selectedCount} anime deleted`,
+                    `Delete ${selectedCount} selected anime from the catalog?`
+                  )
+                }
+              >
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+                Delete Selected
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
       <div className="grid gap-4">
         {filteredAnime.length === 0 ? (
           <div className="glass-card p-8 text-sm text-white/62">No anime matched these filters.</div>
         ) : (
           filteredAnime.map((anime) => (
             <article key={anime.id} className="glass-card overflow-hidden p-4">
-              <div className="grid gap-4 lg:grid-cols-[8rem_1fr_auto] lg:items-center">
+              <div className="grid gap-4 lg:grid-cols-[auto_8rem_1fr_auto] lg:items-center">
+                <label className="inline-flex items-center gap-2 text-sm font-bold text-token-foreground lg:self-center">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-token-border bg-token-card text-token-primary focus:ring-2 focus:ring-token-primary"
+                    checked={selectedSet.has(anime.id)}
+                    onChange={(event) => toggleAnimeSelection(anime.id, event.target.checked)}
+                  />
+                  <span className="lg:sr-only">Select {anime.title}</span>
+                </label>
                 <div className="relative aspect-[3/4] overflow-hidden rounded-2xl bg-token-muted">
                   <SafeImage
                     src={getCardImage(anime)}

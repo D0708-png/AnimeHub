@@ -3,10 +3,11 @@ import {
   createEmptyServerCatalogOverrides,
   mergeCatalogWithServerOverrides,
   normalizeServerCatalogOverrides,
+  type BulkAnimeAction,
   type ServerCatalogOverrides
 } from "@/lib/catalog";
 import type { Anime, AnimeEpisode } from "@/types/anime";
-import { readJsonBlob, writeJsonBlob } from "./blob-store";
+import { readJsonBlob, readJsonBlobWithMetadata, writeJsonBlob } from "./blob-store";
 
 const ADMIN_CATALOG_STORE = "animehub-admin-catalog";
 const ADMIN_CATALOG_KEY = "overrides";
@@ -18,6 +19,10 @@ function nowIso() {
 
 function uniqueIds(ids: string[], nextId: string) {
   return Array.from(new Set([...ids, nextId]));
+}
+
+function uniqueMany(ids: string[], nextIds: string[]) {
+  return Array.from(new Set([...ids, ...nextIds]));
 }
 
 function withoutMetaAnime(anime: Anime) {
@@ -37,7 +42,8 @@ export async function readServerCatalogOverrides() {
   const state = await readJsonBlob<ServerCatalogOverrides>(
     ADMIN_CATALOG_STORE,
     ADMIN_CATALOG_KEY,
-    createEmptyServerCatalogOverrides()
+    createEmptyServerCatalogOverrides(),
+    { consistency: "strong" }
   );
 
   return normalizeServerCatalogOverrides(state);
@@ -49,6 +55,37 @@ export async function writeServerCatalogOverrides(state: ServerCatalogOverrides)
     ADMIN_CATALOG_KEY,
     normalizeServerCatalogOverrides(state)
   );
+}
+
+export const normalizeCatalogOverrides = normalizeServerCatalogOverrides;
+export const getCatalogOverrides = readServerCatalogOverrides;
+export const saveCatalogOverrides = writeServerCatalogOverrides;
+
+async function updateServerCatalogOverrides(
+  mutate: (state: ServerCatalogOverrides) => ServerCatalogOverrides
+) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const { value, etag } = await readJsonBlobWithMetadata<ServerCatalogOverrides>(
+      ADMIN_CATALOG_STORE,
+      ADMIN_CATALOG_KEY,
+      createEmptyServerCatalogOverrides(),
+      { consistency: "strong" }
+    );
+    const currentState = normalizeServerCatalogOverrides(value);
+    const nextState = touchState(normalizeServerCatalogOverrides(mutate(currentState)));
+    const result = await writeJsonBlob(
+      ADMIN_CATALOG_STORE,
+      ADMIN_CATALOG_KEY,
+      nextState,
+      etag ? { onlyIfMatch: etag } : { onlyIfNew: true }
+    );
+
+    if (result.modified) {
+      return nextState;
+    }
+  }
+
+  throw new Error("Catalog changed while saving. Please try again.");
 }
 
 export function getServerMergedCatalog(state: ServerCatalogOverrides) {
@@ -143,107 +180,196 @@ export async function resetServerCatalogOverrides() {
 }
 
 export async function createServerAnime(anime: Anime) {
-  const state = await readServerCatalogOverrides();
-  const catalog = getServerMergedCatalog(state);
+  return updateServerCatalogOverrides((state) => {
+    const catalog = getServerMergedCatalog(state);
 
-  if (catalog.some((item) => item.id === anime.id)) {
-    throw new Error("An anime with this ID already exists.");
-  }
+    if (catalog.some((item) => item.id === anime.id)) {
+      throw new Error("An anime with this ID already exists.");
+    }
 
-  const nextState = touchState({
-    ...state,
-    deletedAnimeIds: state.deletedAnimeIds.filter((id) => id !== anime.id),
-    createdAnime: [...state.createdAnime, anime]
+    return {
+      ...state,
+      deletedAnimeIds: state.deletedAnimeIds.filter((id) => id !== anime.id),
+      createdAnime: [...state.createdAnime, anime]
+    };
   });
-
-  await writeServerCatalogOverrides(nextState);
-  return nextState;
 }
 
 export async function patchServerAnime(animeId: string, patch: Partial<Anime>) {
-  const state = await readServerCatalogOverrides();
-  const timestamp = nowIso();
-  const animePatch = { ...patch };
-  delete animePatch.episodes;
-  const createdAnime = state.createdAnime.map((anime) =>
-    anime.id === animeId ? { ...anime, ...animePatch } : anime
-  );
-  const isCreatedAnime = createdAnime.some((anime) => anime.id === animeId);
-  const nextState = touchState({
-    ...state,
-    deletedAnimeIds: state.deletedAnimeIds.filter((id) => id !== animeId),
-    createdAnime,
-    animeOverrides: isCreatedAnime
-      ? state.animeOverrides
-      : {
-          ...state.animeOverrides,
-          [animeId]: {
-            ...(state.animeOverrides[animeId] ?? {}),
-            ...animePatch,
-            id: animeId,
-            updatedAt: timestamp,
-            updatedBy: ADMIN_USERNAME
-          }
-        }
-  });
+  return updateServerCatalogOverrides((state) => {
+    const timestamp = nowIso();
+    const animePatch = { ...patch };
+    delete animePatch.episodes;
+    const createdAnime = state.createdAnime.map((anime) =>
+      anime.id === animeId ? { ...anime, ...animePatch } : anime
+    );
+    const isCreatedAnime = createdAnime.some((anime) => anime.id === animeId);
 
-  await writeServerCatalogOverrides(nextState);
-  return nextState;
+    return {
+      ...state,
+      deletedAnimeIds: state.deletedAnimeIds.filter((id) => id !== animeId),
+      createdAnime,
+      animeOverrides: isCreatedAnime
+        ? state.animeOverrides
+        : {
+            ...state.animeOverrides,
+            [animeId]: {
+              ...(state.animeOverrides[animeId] ?? {}),
+              ...animePatch,
+              id: animeId,
+              updatedAt: timestamp,
+              updatedBy: ADMIN_USERNAME
+            }
+          }
+    };
+  });
 }
 
 export async function deleteServerAnime(animeId: string) {
-  const state = await readServerCatalogOverrides();
-  const animeOverrides = { ...state.animeOverrides };
-  const episodeOverrides = { ...state.episodeOverrides };
-  const deletedEpisodeIds = { ...state.deletedEpisodeIds };
-  const createdEpisodes = { ...state.createdEpisodes };
+  return updateServerCatalogOverrides((state) => {
+    const isCreatedAnime = state.createdAnime.some((anime) => anime.id === animeId);
+    const animeOverrides = { ...state.animeOverrides };
+    const episodeOverrides = { ...state.episodeOverrides };
+    const deletedEpisodeIds = { ...state.deletedEpisodeIds };
+    const createdEpisodes = { ...state.createdEpisodes };
 
-  delete animeOverrides[animeId];
-  delete episodeOverrides[animeId];
-  delete deletedEpisodeIds[animeId];
-  delete createdEpisodes[animeId];
+    if (isCreatedAnime) {
+      delete animeOverrides[animeId];
+      delete episodeOverrides[animeId];
+      delete deletedEpisodeIds[animeId];
+      delete createdEpisodes[animeId];
+    }
 
-  const nextState = touchState({
-    ...state,
-    animeOverrides,
-    episodeOverrides,
-    deletedEpisodeIds,
-    createdEpisodes,
-    createdAnime: state.createdAnime.filter((anime) => anime.id !== animeId),
-    deletedAnimeIds: uniqueIds(state.deletedAnimeIds, animeId)
+    return {
+      ...state,
+      animeOverrides,
+      episodeOverrides,
+      deletedEpisodeIds,
+      createdEpisodes,
+      createdAnime: state.createdAnime.filter((anime) => anime.id !== animeId),
+      deletedAnimeIds: uniqueIds(state.deletedAnimeIds, animeId)
+    };
   });
+}
 
-  await writeServerCatalogOverrides(nextState);
-  return nextState;
+function getBulkAnimePatch(action: BulkAnimeAction): Partial<Anime> {
+  switch (action) {
+    case "hide":
+      return { isHidden: true };
+    case "unhide":
+      return { isHidden: false };
+    case "markFeatured":
+      return { isFeatured: true };
+    case "removeFeatured":
+      return { isFeatured: false };
+    case "markTrending":
+      return { isTrending: true };
+    case "removeTrending":
+      return { isTrending: false };
+    default:
+      return {};
+  }
+}
+
+export async function bulkUpdateServerAnime(action: BulkAnimeAction, animeIds: string[]) {
+  const ids = Array.from(
+    new Set(animeIds.map((animeId) => String(animeId).trim()).filter(Boolean))
+  );
+
+  if (ids.length === 0) {
+    throw new Error("Select at least one anime.");
+  }
+
+  return updateServerCatalogOverrides((state) => {
+    const timestamp = nowIso();
+    const idSet = new Set(ids);
+
+    if (action === "delete") {
+      const createdIds = new Set(
+        state.createdAnime.filter((anime) => idSet.has(anime.id)).map((anime) => anime.id)
+      );
+      const animeOverrides = { ...state.animeOverrides };
+      const episodeOverrides = { ...state.episodeOverrides };
+      const deletedEpisodeIds = { ...state.deletedEpisodeIds };
+      const createdEpisodes = { ...state.createdEpisodes };
+
+      for (const animeId of createdIds) {
+        delete animeOverrides[animeId];
+        delete episodeOverrides[animeId];
+        delete deletedEpisodeIds[animeId];
+        delete createdEpisodes[animeId];
+      }
+
+      return {
+        ...state,
+        animeOverrides,
+        episodeOverrides,
+        deletedEpisodeIds,
+        createdEpisodes,
+        createdAnime: state.createdAnime.filter((anime) => !idSet.has(anime.id)),
+        deletedAnimeIds: uniqueMany(state.deletedAnimeIds, ids)
+      };
+    }
+
+    const patch = getBulkAnimePatch(action);
+    const createdIds = new Set(
+      state.createdAnime.filter((anime) => idSet.has(anime.id)).map((anime) => anime.id)
+    );
+
+    return {
+      ...state,
+      deletedAnimeIds: state.deletedAnimeIds.filter((animeId) => !idSet.has(animeId)),
+      createdAnime: state.createdAnime.map((anime) =>
+        idSet.has(anime.id) ? { ...anime, ...patch } : anime
+      ),
+      animeOverrides: ids.reduce<ServerCatalogOverrides["animeOverrides"]>(
+        (overrides, animeId) => {
+          if (createdIds.has(animeId)) {
+            return overrides;
+          }
+
+          return {
+            ...overrides,
+            [animeId]: {
+              ...(overrides[animeId] ?? {}),
+              ...patch,
+              id: animeId,
+              updatedAt: timestamp,
+              updatedBy: ADMIN_USERNAME
+            }
+          };
+        },
+        { ...state.animeOverrides }
+      )
+    };
+  });
 }
 
 export async function createServerEpisode(animeId: string, episode: AnimeEpisode) {
-  const state = await readServerCatalogOverrides();
-  const catalog = getServerMergedCatalog(state);
-  const anime = catalog.find((item) => item.id === animeId);
+  return updateServerCatalogOverrides((state) => {
+    const catalog = getServerMergedCatalog(state);
+    const anime = catalog.find((item) => item.id === animeId);
 
-  if (!anime) {
-    throw new Error("Anime not found.");
-  }
-
-  if (anime.episodes.some((item) => item.id === episode.id)) {
-    throw new Error("An episode with this ID already exists.");
-  }
-
-  const nextState = touchState({
-    ...state,
-    deletedEpisodeIds: {
-      ...state.deletedEpisodeIds,
-      [animeId]: (state.deletedEpisodeIds[animeId] ?? []).filter((id) => id !== episode.id)
-    },
-    createdEpisodes: {
-      ...state.createdEpisodes,
-      [animeId]: [...(state.createdEpisodes[animeId] ?? []), episode]
+    if (!anime) {
+      throw new Error("Anime not found.");
     }
-  });
 
-  await writeServerCatalogOverrides(nextState);
-  return nextState;
+    if (anime.episodes.some((item) => item.id === episode.id)) {
+      throw new Error("An episode with this ID already exists.");
+    }
+
+    return {
+      ...state,
+      deletedEpisodeIds: {
+        ...state.deletedEpisodeIds,
+        [animeId]: (state.deletedEpisodeIds[animeId] ?? []).filter((id) => id !== episode.id)
+      },
+      createdEpisodes: {
+        ...state.createdEpisodes,
+        [animeId]: [...(state.createdEpisodes[animeId] ?? []), episode]
+      }
+    };
+  });
 }
 
 export async function patchServerEpisode(
@@ -251,92 +377,102 @@ export async function patchServerEpisode(
   episodeId: string,
   patch: Partial<AnimeEpisode>
 ) {
-  const state = await readServerCatalogOverrides();
-  const timestamp = nowIso();
-  const createdEpisodes = state.createdEpisodes[animeId] ?? [];
-  const createdEpisodeExists = createdEpisodes.some((episode) => episode.id === episodeId);
-  const nextCreatedEpisodes = createdEpisodeExists
-    ? createdEpisodes.map((episode) =>
-        episode.id === episodeId ? { ...episode, ...patch } : episode
-      )
-    : createdEpisodes;
-  const createdAnime = state.createdAnime.map((anime) =>
-    anime.id === animeId
-      ? {
-          ...anime,
-          episodes: anime.episodes.map((episode) =>
-            episode.id === episodeId ? { ...episode, ...patch } : episode
-          )
-        }
-      : anime
-  );
-  const createdAnimeEpisodeExists = createdAnime.some(
-    (anime) => anime.id === animeId && anime.episodes.some((episode) => episode.id === episodeId)
-  );
-  const shouldStoreOverride = !createdEpisodeExists && !createdAnimeEpisodeExists;
-  const nextState = touchState({
-    ...state,
-    createdAnime,
-    createdEpisodes: {
-      ...state.createdEpisodes,
-      [animeId]: nextCreatedEpisodes
-    },
-    episodeOverrides: shouldStoreOverride
-      ? {
-          ...state.episodeOverrides,
-          [animeId]: {
-            ...(state.episodeOverrides[animeId] ?? {}),
-            [episodeId]: {
-              ...(state.episodeOverrides[animeId]?.[episodeId] ?? {}),
-              ...patch,
-              id: episodeId,
-              updatedAt: timestamp,
-              updatedBy: ADMIN_USERNAME
+  return updateServerCatalogOverrides((state) => {
+    const timestamp = nowIso();
+    const createdEpisodes = state.createdEpisodes[animeId] ?? [];
+    const createdEpisodeExists = createdEpisodes.some((episode) => episode.id === episodeId);
+    const nextCreatedEpisodes = createdEpisodeExists
+      ? createdEpisodes.map((episode) =>
+          episode.id === episodeId ? { ...episode, ...patch } : episode
+        )
+      : createdEpisodes;
+    const createdAnime = state.createdAnime.map((anime) =>
+      anime.id === animeId
+        ? {
+            ...anime,
+            episodes: anime.episodes.map((episode) =>
+              episode.id === episodeId ? { ...episode, ...patch } : episode
+            )
+          }
+        : anime
+    );
+    const createdAnimeEpisodeExists = createdAnime.some(
+      (anime) => anime.id === animeId && anime.episodes.some((episode) => episode.id === episodeId)
+    );
+    const shouldStoreOverride = !createdEpisodeExists && !createdAnimeEpisodeExists;
+
+    return {
+      ...state,
+      createdAnime,
+      createdEpisodes: {
+        ...state.createdEpisodes,
+        [animeId]: nextCreatedEpisodes
+      },
+      episodeOverrides: shouldStoreOverride
+        ? {
+            ...state.episodeOverrides,
+            [animeId]: {
+              ...(state.episodeOverrides[animeId] ?? {}),
+              [episodeId]: {
+                ...(state.episodeOverrides[animeId]?.[episodeId] ?? {}),
+                ...patch,
+                id: episodeId,
+                updatedAt: timestamp,
+                updatedBy: ADMIN_USERNAME
+              }
             }
           }
-        }
-      : state.episodeOverrides
+        : state.episodeOverrides
+    };
   });
-
-  await writeServerCatalogOverrides(nextState);
-  return nextState;
 }
 
 export async function deleteServerEpisode(animeId: string, episodeId: string) {
-  const state = await readServerCatalogOverrides();
-  const animeEpisodes = state.episodeOverrides[animeId]
-    ? { ...state.episodeOverrides[animeId] }
-    : {};
-  const episodeOverrides = { ...state.episodeOverrides };
+  return updateServerCatalogOverrides((state) => {
+    const animeEpisodes = state.episodeOverrides[animeId]
+      ? { ...state.episodeOverrides[animeId] }
+      : {};
+    const episodeOverrides = { ...state.episodeOverrides };
 
-  delete animeEpisodes[episodeId];
+    delete animeEpisodes[episodeId];
 
-  if (Object.keys(animeEpisodes).length > 0) {
-    episodeOverrides[animeId] = animeEpisodes;
-  } else {
-    delete episodeOverrides[animeId];
-  }
-
-  const nextState = touchState({
-    ...state,
-    createdAnime: state.createdAnime.map((anime) =>
-      anime.id === animeId
-        ? { ...anime, episodes: anime.episodes.filter((episode) => episode.id !== episodeId) }
-        : anime
-    ),
-    createdEpisodes: {
-      ...state.createdEpisodes,
-      [animeId]: (state.createdEpisodes[animeId] ?? []).filter(
-        (episode) => episode.id !== episodeId
-      )
-    },
-    episodeOverrides,
-    deletedEpisodeIds: {
-      ...state.deletedEpisodeIds,
-      [animeId]: uniqueIds(state.deletedEpisodeIds[animeId] ?? [], episodeId)
+    if (Object.keys(animeEpisodes).length > 0) {
+      episodeOverrides[animeId] = animeEpisodes;
+    } else {
+      delete episodeOverrides[animeId];
     }
-  });
 
-  await writeServerCatalogOverrides(nextState);
-  return nextState;
+    return {
+      ...state,
+      createdAnime: state.createdAnime.map((anime) =>
+        anime.id === animeId
+          ? { ...anime, episodes: anime.episodes.filter((episode) => episode.id !== episodeId) }
+          : anime
+      ),
+      createdEpisodes: {
+        ...state.createdEpisodes,
+        [animeId]: (state.createdEpisodes[animeId] ?? []).filter(
+          (episode) => episode.id !== episodeId
+        )
+      },
+      episodeOverrides,
+      deletedEpisodeIds: {
+        ...state.deletedEpisodeIds,
+        [animeId]: uniqueIds(state.deletedEpisodeIds[animeId] ?? [], episodeId)
+      }
+    };
+  });
 }
+
+export async function restoreServerAnime(animeId: string) {
+  return updateServerCatalogOverrides((state) => ({
+    ...state,
+    deletedAnimeIds: state.deletedAnimeIds.filter((id) => id !== animeId)
+  }));
+}
+
+export const patchAnimeOverride = patchServerAnime;
+export const deleteAnimeOverride = deleteServerAnime;
+export const restoreAnimeOverride = restoreServerAnime;
+export const patchEpisodeOverride = patchServerEpisode;
+export const deleteEpisodeOverride = deleteServerEpisode;
