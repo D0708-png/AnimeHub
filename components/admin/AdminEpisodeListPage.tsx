@@ -22,7 +22,13 @@ function sourceTypeOf(episode: AnimeEpisode) {
 }
 
 export function AdminEpisodeListPage({ animeId }: AdminEpisodeListPageProps) {
-  const { catalog, baseLoaded, hasHydrated, upsertAnime } = useFullAdminCatalog();
+  const {
+    catalog,
+    baseLoaded,
+    hasHydrated,
+    updateEpisode,
+    deleteEpisode: deleteEpisodeFromServer
+  } = useFullAdminCatalog();
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query, 200);
   const [embedFilter, setEmbedFilter] = useState("All");
@@ -59,20 +65,14 @@ export function AdminEpisodeListPage({ animeId }: AdminEpisodeListPageProps) {
   }, [anime?.episodes, debouncedQuery, embedFilter, sourceTypeFilter]);
 
   function deleteEpisode(episodeId: string) {
-    if (!anime || !window.confirm("Delete this episode locally?")) {
+    if (!anime || !window.confirm("Delete this episode from the site catalog?")) {
       return;
     }
 
-    upsertAnime(
-      {
-        ...anime,
-        episodes: anime.episodes.filter((episode) => episode.id !== episodeId)
-      },
-      "Episode deleted locally"
-    );
+    void deleteEpisodeFromServer(anime.id, episodeId);
   }
 
-  function moveEpisode(episodeId: string, direction: -1 | 1) {
+  async function moveEpisode(episodeId: string, direction: -1 | 1) {
     if (!anime) {
       return;
     }
@@ -88,7 +88,9 @@ export function AdminEpisodeListPage({ animeId }: AdminEpisodeListPageProps) {
     const [episode] = nextAnime.episodes.splice(currentIndex, 1);
     nextAnime.episodes.splice(targetIndex, 0, episode);
     nextAnime.episodes = normalizeEpisodeNumbers(nextAnime.episodes);
-    upsertAnime(nextAnime, "Episodes reordered locally");
+    for (const nextEpisode of nextAnime.episodes) {
+      await updateEpisode(anime.id, nextEpisode.id, { number: nextEpisode.number });
+    }
   }
 
   function toggleEpisodeHidden(episodeId: string) {
@@ -102,15 +104,7 @@ export function AdminEpisodeListPage({ animeId }: AdminEpisodeListPageProps) {
       return;
     }
 
-    upsertAnime(
-      {
-        ...anime,
-        episodes: anime.episodes.map((episode) =>
-          episode.id === episodeId ? { ...episode, isHidden: !episode.isHidden } : episode
-        )
-      },
-      "Episode visibility updated locally"
-    );
+    void updateEpisode(anime.id, episodeId, { isHidden: !currentEpisode?.isHidden });
   }
 
   if (!baseLoaded || !hasHydrated) {
@@ -121,7 +115,7 @@ export function AdminEpisodeListPage({ animeId }: AdminEpisodeListPageProps) {
     return (
       <div className="glass-card p-8">
         <h1 className="text-2xl font-black text-white">Anime not found</h1>
-        <p className="mt-2 text-sm text-white/62">This local item may have been deleted or reset.</p>
+        <p className="mt-2 text-sm text-white/62">This item may have been deleted or reset.</p>
         <Link href="/admin/anime" className="button-primary mt-5">
           Back to anime
         </Link>
@@ -137,7 +131,7 @@ export function AdminEpisodeListPage({ animeId }: AdminEpisodeListPageProps) {
             <p className="text-xs font-black uppercase tracking-[0.18em] text-cyan">Episode Manager</p>
             <h1 className="mt-2 text-3xl font-black text-white">{anime.title}</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-white/62">
-              Admin changes are saved locally in this browser. Export JSON to make the cleaned catalog permanent.
+              Changes are saved to the site catalog. Updates may take a moment to appear across devices.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

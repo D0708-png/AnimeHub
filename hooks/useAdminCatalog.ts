@@ -1,194 +1,229 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { showToast } from "@/components/ToastProvider";
-import { STORAGE_KEYS } from "@/lib/constants";
 import {
-  type AdminCatalogOverrides,
-  createEmptyAdminCatalog,
-  mergeCatalogWithOverrides,
-  normalizeAdminCatalog
+  createEmptyServerCatalogOverrides,
+  mergeCatalogWithServerOverrides,
+  normalizeServerCatalogOverrides,
+  type ServerCatalogOverrides
 } from "@/lib/catalog";
 import type { Anime, AnimeEpisode } from "@/types/anime";
-import { useLocalStorage } from "./useLocalStorage";
 
 function cloneAnime(anime: Anime): Anime {
   return JSON.parse(JSON.stringify(anime)) as Anime;
 }
 
-function touchState(state: AdminCatalogOverrides): AdminCatalogOverrides {
-  return {
-    ...state,
-    updatedAt: new Date().toISOString()
-  };
+function stripAnimeEpisodes(anime: Anime): Partial<Anime> {
+  const { episodes: _episodes, ...animeFields } = anime;
+  return animeFields;
 }
 
-function uniqueDeletedIds(ids: string[], nextId: string) {
-  return Array.from(new Set([...ids, nextId]));
+async function parseApiError(response: Response, fallback: string) {
+  const data = await response.json().catch(() => ({}));
+  return typeof data.error === "string" ? data.error : fallback;
+}
+
+async function fetchOverrides(path: string, init?: RequestInit) {
+  const response = await fetch(path, {
+    ...init,
+    credentials: "include",
+    cache: "no-store",
+    headers: {
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(init?.headers ?? {})
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, "Unable to load catalog changes."));
+  }
+
+  const data = await response.json().catch(() => ({}));
+  return normalizeServerCatalogOverrides(data.overrides);
 }
 
 export function useAdminCatalog(baseCatalog: Anime[]) {
-  const [rawState, setRawState, hasHydrated] = useLocalStorage<AdminCatalogOverrides>(
-    STORAGE_KEYS.adminCatalog,
-    createEmptyAdminCatalog()
+  const [serverState, setServerState] = useState<ServerCatalogOverrides>(
+    createEmptyServerCatalogOverrides()
   );
-  const state = useMemo(() => normalizeAdminCatalog(rawState), [rawState]);
+  const [hasHydrated, setHasHydrated] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const baseIds = useMemo(() => new Set(baseCatalog.map((anime) => anime.id)), [baseCatalog]);
   const catalog = useMemo(
-    () => mergeCatalogWithOverrides(baseCatalog, state),
-    [baseCatalog, state]
+    () => mergeCatalogWithServerOverrides(baseCatalog, serverState),
+    [baseCatalog, serverState]
+  );
+
+  const reloadCatalog = useCallback(async () => {
+    setIsSyncing(true);
+
+    try {
+      const overrides = await fetchOverrides("/api/catalog-overrides");
+      setServerState(overrides);
+    } catch {
+      setServerState(createEmptyServerCatalogOverrides());
+    } finally {
+      setHasHydrated(true);
+      setIsSyncing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void reloadCatalog();
+  }, [reloadCatalog]);
+
+  const applyMutation = useCallback(
+    async (
+      request: Promise<ServerCatalogOverrides>,
+      toastMessage: string,
+      tone: "success" | "info" = "success"
+    ) => {
+      try {
+        const overrides = await request;
+        setServerState(overrides);
+        showToast({ message: toastMessage, tone });
+        return true;
+      } catch (error) {
+        showToast({
+          message: error instanceof Error ? error.message : "Unable to update catalog",
+          tone: "danger"
+        });
+        return false;
+      }
+    },
+    []
   );
 
   const upsertAnime = useCallback(
-    (anime: Anime, toastMessage = "Catalog item saved locally") => {
-      setRawState((current) => {
-        const normalized = normalizeAdminCatalog(current);
-        const next = touchState({
-          ...normalized,
-          deletedAnimeIds: normalized.deletedAnimeIds.filter((id) => id !== anime.id),
-          itemsById: {
-            ...normalized.itemsById,
-            [anime.id]: cloneAnime(anime)
-          }
-        });
+    async (anime: Anime, toastMessage = "Catalog item saved") => {
+      const isBaseAnime = baseIds.has(anime.id);
+      const isCreatedAnime = serverState.createdAnime.some((item) => item.id === anime.id);
+      const request =
+        isBaseAnime || isCreatedAnime
+          ? fetchOverrides(`/api/admin/anime/${encodeURIComponent(anime.id)}`, {
+              method: "PATCH",
+              body: JSON.stringify({ patch: stripAnimeEpisodes(anime) })
+            })
+          : fetchOverrides("/api/admin/anime", {
+              method: "POST",
+              body: JSON.stringify({ anime: cloneAnime(anime) })
+            });
 
-        return next;
-      });
-      showToast({ message: toastMessage, tone: "success" });
+      return applyMutation(request, toastMessage);
     },
-    [setRawState]
+    [applyMutation, baseIds, serverState.createdAnime]
   );
 
   const updateAnime = useCallback(
-    (animeId: string, patch: Partial<Anime>, toastMessage?: string) => {
-      const currentAnime = catalog.find((anime) => anime.id === animeId);
-
-      if (!currentAnime) {
-        return;
-      }
-
-      upsertAnime(
-        {
-          ...currentAnime,
-          ...patch
-        },
-        toastMessage ?? "Anime updated locally"
+    async (animeId: string, patch: Partial<Anime>, toastMessage?: string) => {
+      return applyMutation(
+        fetchOverrides(`/api/admin/anime/${encodeURIComponent(animeId)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ patch })
+        }),
+        toastMessage ?? "Anime updated"
       );
     },
-    [catalog, upsertAnime]
+    [applyMutation]
   );
 
   const deleteAnime = useCallback(
-    (animeId: string) => {
-      setRawState((current) => {
-        const normalized = normalizeAdminCatalog(current);
-        const itemsById = { ...normalized.itemsById };
-        delete itemsById[animeId];
-
-        return touchState({
-          ...normalized,
-          itemsById,
-          deletedAnimeIds: uniqueDeletedIds(normalized.deletedAnimeIds, animeId)
-        });
-      });
-      showToast({ message: "Anime deleted locally", tone: "info" });
+    async (animeId: string) => {
+      return applyMutation(
+        fetchOverrides(`/api/admin/anime/${encodeURIComponent(animeId)}`, {
+          method: "DELETE"
+        }),
+        "Anime deleted",
+        "info"
+      );
     },
-    [setRawState]
+    [applyMutation]
   );
 
   const restoreAnime = useCallback(
-    (animeId: string) => {
-      setRawState((current) => {
-        const normalized = normalizeAdminCatalog(current);
-
-        return touchState({
-          ...normalized,
-          deletedAnimeIds: normalized.deletedAnimeIds.filter((id) => id !== animeId)
-        });
-      });
-      showToast({ message: "Anime restored locally", tone: "success" });
+    async (animeId: string) => {
+      return updateAnime(animeId, {}, "Anime restored");
     },
-    [setRawState]
+    [updateAnime]
   );
 
   const updateEpisode = useCallback(
-    (animeId: string, episodeId: string, patch: Partial<AnimeEpisode>) => {
-      const currentAnime = catalog.find((anime) => anime.id === animeId);
-
-      if (!currentAnime) {
-        return;
-      }
-
-      upsertAnime(
-        {
-          ...currentAnime,
-          episodes: currentAnime.episodes.map((episode) =>
-            episode.id === episodeId ? { ...episode, ...patch } : episode
-          )
-        },
-        "Episode updated locally"
+    async (animeId: string, episodeId: string, patch: Partial<AnimeEpisode>) => {
+      return applyMutation(
+        fetchOverrides(
+          `/api/admin/anime/${encodeURIComponent(animeId)}/episodes/${encodeURIComponent(
+            episodeId
+          )}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({ patch })
+          }
+        ),
+        "Episode updated"
       );
     },
-    [catalog, upsertAnime]
+    [applyMutation]
   );
 
   const addEpisode = useCallback(
-    (animeId: string, episode: AnimeEpisode) => {
-      const currentAnime = catalog.find((anime) => anime.id === animeId);
-
-      if (!currentAnime) {
-        return;
-      }
-
-      upsertAnime(
-        {
-          ...currentAnime,
-          episodes: [...currentAnime.episodes, episode].sort((a, b) => a.number - b.number)
-        },
-        "Episode added locally"
+    async (animeId: string, episode: AnimeEpisode) => {
+      return applyMutation(
+        fetchOverrides(`/api/admin/anime/${encodeURIComponent(animeId)}/episodes`, {
+          method: "POST",
+          body: JSON.stringify({ episode })
+        }),
+        "Episode added"
       );
     },
-    [catalog, upsertAnime]
+    [applyMutation]
   );
 
   const deleteEpisode = useCallback(
-    (animeId: string, episodeId: string) => {
-      const currentAnime = catalog.find((anime) => anime.id === animeId);
-
-      if (!currentAnime) {
-        return;
-      }
-
-      upsertAnime(
-        {
-          ...currentAnime,
-          episodes: currentAnime.episodes.filter((episode) => episode.id !== episodeId)
-        },
-        "Episode deleted locally"
+    async (animeId: string, episodeId: string) => {
+      return applyMutation(
+        fetchOverrides(
+          `/api/admin/anime/${encodeURIComponent(animeId)}/episodes/${encodeURIComponent(
+            episodeId
+          )}`,
+          {
+            method: "DELETE"
+          }
+        ),
+        "Episode deleted",
+        "info"
       );
     },
-    [catalog, upsertAnime]
+    [applyMutation]
   );
 
   const replaceCatalog = useCallback(
-    (anime: Anime[]) => {
-      const itemsById = Object.fromEntries(anime.map((item) => [item.id, cloneAnime(item)]));
-
-      setRawState(
-        touchState({
-          version: 1,
-          itemsById,
-          deletedAnimeIds: []
-        })
+    async (anime: Anime[]) => {
+      return applyMutation(
+        fetchOverrides("/api/admin/catalog-overrides", {
+          method: "PUT",
+          body: JSON.stringify({ catalog: anime.map(cloneAnime) })
+        }),
+        "Catalog JSON imported"
       );
-      showToast({ message: "Catalog JSON imported locally", tone: "success" });
     },
-    [setRawState]
+    [applyMutation]
   );
 
-  const resetAdminCatalog = useCallback(() => {
-    setRawState(createEmptyAdminCatalog());
-    showToast({ message: "Local admin changes reset", tone: "info" });
-  }, [setRawState]);
+  const resetAdminCatalog = useCallback(async () => {
+    return applyMutation(
+      fetchOverrides("/api/admin/catalog-reset", {
+        method: "POST"
+      }),
+      "Site catalog changes reset",
+      "info"
+    );
+  }, [applyMutation]);
+
+  const syncCatalog = useCallback(async () => {
+    await reloadCatalog();
+    showToast({ message: "Catalog synced", tone: "info" });
+  }, [reloadCatalog]);
 
   const exportCatalog = useCallback(
     () => JSON.stringify(catalog, null, 2),
@@ -196,9 +231,10 @@ export function useAdminCatalog(baseCatalog: Anime[]) {
   );
 
   return {
-    state,
+    state: serverState,
     catalog,
     hasHydrated,
+    isSyncing,
     upsertAnime,
     updateAnime,
     deleteAnime,
@@ -208,6 +244,7 @@ export function useAdminCatalog(baseCatalog: Anime[]) {
     deleteEpisode,
     replaceCatalog,
     resetAdminCatalog,
+    syncCatalog,
     exportCatalog
   };
 }

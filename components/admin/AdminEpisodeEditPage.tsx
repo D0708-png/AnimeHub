@@ -16,7 +16,6 @@ import {
 import type { AnimeEpisode, VideoSourceType } from "@/types/anime";
 import {
   adminSourceTypes,
-  cloneAnime,
   createManualEpisode
 } from "./adminRouteHelpers";
 import { useFullAdminCatalog } from "./useFullAdminCatalog";
@@ -55,7 +54,7 @@ function sourceFromUrl(input: string): VideoSourceType {
 
 export function AdminEpisodeEditPage({ animeId, episodeId }: AdminEpisodeEditPageProps) {
   const router = useRouter();
-  const { catalog, baseLoaded, hasHydrated, upsertAnime } = useFullAdminCatalog();
+  const { catalog, baseLoaded, hasHydrated, addEpisode, updateEpisode } = useFullAdminCatalog();
   const [draft, setDraft] = useState<AnimeEpisode | null>(null);
   const [loadedKey, setLoadedKey] = useState("");
   const [youtubeInput, setYoutubeInput] = useState("");
@@ -154,7 +153,7 @@ export function AdminEpisodeEditPage({ animeId, episodeId }: AdminEpisodeEditPag
     showToast({ message: "Video URL applied", tone: "success" });
   }
 
-  function saveDraft() {
+  async function saveDraft() {
     if (!anime || !draft) {
       return;
     }
@@ -164,7 +163,6 @@ export function AdminEpisodeEditPage({ animeId, episodeId }: AdminEpisodeEditPag
       return;
     }
 
-    const nextAnime = cloneAnime(anime);
     const nextEpisode: AnimeEpisode = {
       ...draft,
       number: Number(draft.number) || 1,
@@ -176,17 +174,11 @@ export function AdminEpisodeEditPage({ animeId, episodeId }: AdminEpisodeEditPag
       thumbnail: draft.thumbnail || anime.bannerImage || anime.posterImage
     };
 
-    if (isNew) {
-      nextAnime.episodes = [...nextAnime.episodes, nextEpisode].sort((a, b) => a.number - b.number);
-    } else {
-      nextAnime.episodes = nextAnime.episodes.map((episode) =>
-        episode.id === nextEpisode.id ? nextEpisode : episode
-      );
-    }
+    const saved = isNew
+      ? await addEpisode(anime.id, nextEpisode)
+      : await updateEpisode(anime.id, nextEpisode.id, nextEpisode);
 
-    upsertAnime(nextAnime, isNew ? "Episode added locally" : "Episode editor saved locally");
-
-    if (isNew) {
+    if (saved && isNew) {
       router.replace(
         `/admin/anime/${encodeURIComponent(anime.id)}/episodes/${encodeURIComponent(nextEpisode.id)}/edit`
       );
@@ -201,7 +193,7 @@ export function AdminEpisodeEditPage({ animeId, episodeId }: AdminEpisodeEditPag
     return (
       <div className="glass-card p-8">
         <h1 className="text-2xl font-black text-white">Anime not found</h1>
-        <p className="mt-2 text-sm text-white/62">This local item may have been deleted or reset.</p>
+        <p className="mt-2 text-sm text-white/62">This item may have been deleted or reset.</p>
         <Link href="/admin/anime" className="button-primary mt-5">
           Back to anime
         </Link>
@@ -213,7 +205,7 @@ export function AdminEpisodeEditPage({ animeId, episodeId }: AdminEpisodeEditPag
     return (
       <div className="glass-card p-8">
         <h1 className="text-2xl font-black text-white">Episode not found</h1>
-        <p className="mt-2 text-sm text-white/62">This local episode may have been deleted or reset.</p>
+        <p className="mt-2 text-sm text-white/62">This episode may have been deleted or reset.</p>
         <Link href={`/admin/anime/${encodeURIComponent(anime.id)}/episodes`} className="button-primary mt-5">
           Back to episodes
         </Link>
@@ -235,7 +227,7 @@ export function AdminEpisodeEditPage({ animeId, episodeId }: AdminEpisodeEditPag
             </p>
             <h1 className="mt-2 text-3xl font-black text-white">{anime.title}</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-white/62">
-              Admin changes are saved locally in this browser. YouTube videos remain official iframe embeds; direct MP4 links use native HTML5 video.
+              Changes are saved to the site catalog. Source player settings update globally after refresh.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

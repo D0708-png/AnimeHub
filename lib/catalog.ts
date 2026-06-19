@@ -15,6 +15,27 @@ export interface AdminCatalogOverrides {
   updatedAt?: string;
 }
 
+export type ServerAnimeOverride = Partial<Omit<Anime, "episodes">> & {
+  updatedAt?: string;
+  updatedBy?: string;
+};
+
+export type ServerEpisodeOverride = Partial<AnimeEpisode> & {
+  updatedAt?: string;
+  updatedBy?: string;
+};
+
+export interface ServerCatalogOverrides {
+  version: 1;
+  updatedAt?: string;
+  animeOverrides: Record<string, ServerAnimeOverride>;
+  deletedAnimeIds: string[];
+  createdAnime: Anime[];
+  episodeOverrides: Record<string, Record<string, ServerEpisodeOverride>>;
+  deletedEpisodeIds: Record<string, string[]>;
+  createdEpisodes: Record<string, AnimeEpisode[]>;
+}
+
 export type AnimeSourceKey = "muse-indonesia" | "ani-one-indonesia" | "manual" | "other";
 
 export interface DuplicateGroup<T> {
@@ -48,6 +69,19 @@ export function createEmptyAdminCatalog(): AdminCatalogOverrides {
     version: 1,
     itemsById: {},
     deletedAnimeIds: []
+  };
+}
+
+export function createEmptyServerCatalogOverrides(): ServerCatalogOverrides {
+  return {
+    version: 1,
+    updatedAt: undefined,
+    animeOverrides: {},
+    deletedAnimeIds: [],
+    createdAnime: [],
+    episodeOverrides: {},
+    deletedEpisodeIds: {},
+    createdEpisodes: {}
   };
 }
 
@@ -216,6 +250,130 @@ export function mergeCatalogWithOverrides(
   ).map((anime) => normalizeMergedAnime(anime, true));
 
   return [...merged, ...customItems];
+}
+
+function stripServerMeta<T extends { updatedAt?: string; updatedBy?: string }>(value: T) {
+  const rest = { ...value };
+  delete rest.updatedAt;
+  delete rest.updatedBy;
+  return rest;
+}
+
+export function normalizeServerCatalogOverrides(
+  state: ServerCatalogOverrides | null | undefined
+): ServerCatalogOverrides {
+  const empty = createEmptyServerCatalogOverrides();
+
+  if (!state || typeof state !== "object") {
+    return empty;
+  }
+
+  return {
+    version: 1,
+    updatedAt: typeof state.updatedAt === "string" ? state.updatedAt : undefined,
+    animeOverrides:
+      state.animeOverrides && typeof state.animeOverrides === "object"
+        ? state.animeOverrides
+        : {},
+    deletedAnimeIds: Array.isArray(state.deletedAnimeIds) ? state.deletedAnimeIds : [],
+    createdAnime: Array.isArray(state.createdAnime) ? state.createdAnime : [],
+    episodeOverrides:
+      state.episodeOverrides && typeof state.episodeOverrides === "object"
+        ? state.episodeOverrides
+        : {},
+    deletedEpisodeIds:
+      state.deletedEpisodeIds && typeof state.deletedEpisodeIds === "object"
+        ? state.deletedEpisodeIds
+        : {},
+    createdEpisodes:
+      state.createdEpisodes && typeof state.createdEpisodes === "object"
+        ? state.createdEpisodes
+        : {}
+  };
+}
+
+export function mergeCatalogWithServerOverrides(
+  baseCatalog: Anime[],
+  overrides: ServerCatalogOverrides | null | undefined
+) {
+  const state = normalizeServerCatalogOverrides(overrides);
+  const deletedAnimeIds = new Set(state.deletedAnimeIds);
+  const mergedIds = new Set<string>();
+  const merged = baseCatalog
+    .filter((anime) => !deletedAnimeIds.has(anime.id))
+    .map((anime) => {
+      const animeOverride = state.animeOverrides[anime.id];
+      const mergedAnime: Anime = {
+        ...anime,
+        ...(animeOverride ? stripServerMeta(animeOverride) : {})
+      };
+
+      mergedIds.add(anime.id);
+      return normalizeMergedAnime(
+        mergeEpisodesWithServerOverrides(mergedAnime, state),
+        Boolean(animeOverride)
+      );
+    });
+  const createdAnime = state.createdAnime
+    .filter((anime) => !deletedAnimeIds.has(anime.id))
+    .map((anime) => {
+      const animeOverride = state.animeOverrides[anime.id];
+      const mergedAnime: Anime = {
+        ...anime,
+        ...(animeOverride ? stripServerMeta(animeOverride) : {})
+      };
+
+      mergedIds.add(anime.id);
+      return normalizeMergedAnime(
+        mergeEpisodesWithServerOverrides(mergedAnime, state),
+        true
+      );
+    });
+  const overrideOnlyAnime = Object.entries(state.animeOverrides)
+    .filter(([animeId]) => !mergedIds.has(animeId) && !deletedAnimeIds.has(animeId))
+    .filter(([, animeOverride]) => Array.isArray((animeOverride as Partial<Anime>).episodes))
+    .map(([, animeOverride]) =>
+      normalizeMergedAnime(
+        mergeEpisodesWithServerOverrides(stripServerMeta(animeOverride) as Anime, state),
+        true
+      )
+    )
+    .filter((anime) => anime.id);
+
+  return [...merged, ...createdAnime, ...overrideOnlyAnime];
+}
+
+function mergeEpisodesWithServerOverrides(
+  anime: Anime,
+  state: ServerCatalogOverrides
+): Anime {
+  const deletedEpisodeIds = new Set(state.deletedEpisodeIds[anime.id] ?? []);
+  const episodeOverrides = state.episodeOverrides[anime.id] ?? {};
+  const createdEpisodes = state.createdEpisodes[anime.id] ?? [];
+  const episodeIds = new Set<string>();
+  const baseEpisodes = (anime.episodes ?? [])
+    .filter((episode) => !deletedEpisodeIds.has(episode.id))
+    .map((episode) => {
+      const override = episodeOverrides[episode.id];
+      const mergedEpisode = override
+        ? { ...episode, ...stripServerMeta(override) }
+        : episode;
+
+      episodeIds.add(episode.id);
+      return mergedEpisode;
+    });
+  const extraEpisodes = createdEpisodes
+    .filter((episode) => !deletedEpisodeIds.has(episode.id))
+    .filter((episode) => !episodeIds.has(episode.id))
+    .map((episode) => {
+      const override = episodeOverrides[episode.id];
+      return override ? { ...episode, ...stripServerMeta(override) } : episode;
+    });
+
+  return {
+    ...anime,
+    episodes: [...baseEpisodes, ...extraEpisodes].sort((a, b) => a.number - b.number)
+  };
 }
 
 export function getPublicCatalog(catalog: Anime[]) {

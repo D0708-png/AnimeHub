@@ -10,6 +10,5 @@ export const STORAGE_KEYS = {
   comments: "animehub.comments",
   preferences: "animehub.preferences",
   recentSearches: "animehub.recentSearches",
-  theme: "animehub.theme",
-  adminCatalog: "animehub.adminCatalog"
+  theme: "animehub.theme"
 } as const;

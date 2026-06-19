@@ -2,7 +2,7 @@
 
 AnimeHub Official Watch is a Next.js App Router anime discovery and viewing experience built with TypeScript, Tailwind CSS, GSAP, Netlify API routes, and Netlify Blobs.
 
-The public app focuses on browsing, watch history, watchlists, source-aware playback, shared comments, and a local admin catalog workflow. Video playback continues to use supported source players, including official YouTube iframe playback for YouTube videos and native HTML5 video for direct playable video files.
+The public app focuses on browsing, watch history, watchlists, source-aware playback, shared comments, and a global admin-managed catalog workflow. Video playback continues to use supported source players, including official YouTube iframe playback for YouTube videos and native HTML5 video for direct playable video files.
 
 ## Getting Started
 
@@ -109,6 +109,9 @@ Then test:
 - `/login` with admin credentials reveals the Admin Panel link.
 - `/admin` rejects normal users and allows admin users.
 - Comments can be posted, refreshed, liked, and deleted according to role.
+- Admin catalog edits appear after refresh in another browser/session.
+
+`npm run dev` is useful for normal Next.js UI work, but `netlify dev` is the better local test for Netlify Blobs and function behavior.
 
 ## Import Official YouTube Playlists
 
@@ -155,7 +158,27 @@ Private, deleted, unavailable, restricted, and non-embeddable videos are not byp
 
 Admin users can open `/admin` after signing in. The admin catalog manager can edit anime, episode metadata, visibility, featured/trending/ongoing settings, image fields, and metadata review markers.
 
-Admin catalog edits are kept as browser-side overrides until exported. Use Export JSON when you want to make a cleaned catalog permanent in project data.
+Admin catalog edits are saved globally in Netlify Blobs under the `animehub-admin-catalog` store. The app merges manual data, generated YouTube data, and server-side admin overrides for public and admin pages.
+
+Protected admin APIs:
+
+- `GET /api/admin/catalog-overrides`
+- `PUT /api/admin/catalog-overrides`
+- `POST /api/admin/catalog-reset`
+- `POST /api/admin/anime`
+- `PATCH /api/admin/anime/:id`
+- `DELETE /api/admin/anime/:id`
+- `POST /api/admin/anime/:id/episodes`
+- `PATCH /api/admin/anime/:id/episodes/:episodeId`
+- `DELETE /api/admin/anime/:id/episodes/:episodeId`
+
+Read-only public catalog overrides are served from:
+
+- `GET /api/catalog-overrides`
+
+Admin API calls require an admin session cookie. Logged-out requests receive `401`, and normal user requests receive `403`.
+
+Global admin changes survive redeploys because they are stored in Netlify Blobs. Export JSON is still available as a backup/cleanup tool.
 
 ## Scripts
 

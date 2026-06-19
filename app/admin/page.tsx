@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 export const metadata: Metadata = {
-  title: "Local Admin"
+  title: "Admin"
 };
 
 export default function AdminPage() {

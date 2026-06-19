@@ -87,7 +87,7 @@ export function AdminAnimeEditPage({ animeId }: AdminAnimeEditPageProps) {
     };
   }
 
-  function saveDraft() {
+  async function saveDraft() {
     if (!draft) {
       return;
     }
@@ -118,9 +118,9 @@ export function AdminAnimeEditPage({ animeId }: AdminAnimeEditPageProps) {
       ongoingRank: draft.ongoingRank ? Number(draft.ongoingRank) : undefined
     };
 
-    upsertAnime(nextAnime, isNew ? "Anime added locally" : "Anime editor saved locally");
+    const saved = await upsertAnime(nextAnime, isNew ? "Anime added" : "Anime editor saved");
 
-    if (isNew) {
+    if (saved && isNew) {
       router.replace(`/admin/anime/${encodeURIComponent(nextAnime.id)}/edit`);
     }
   }
@@ -158,7 +158,7 @@ export function AdminAnimeEditPage({ animeId }: AdminAnimeEditPageProps) {
 
     setDraft(nextDraft);
     setImageFieldsTouched(false);
-    upsertAnime(nextDraft, "Metadata review marked done locally");
+    void upsertAnime(nextDraft, "Metadata review marked done");
   }
 
   if (!baseLoaded || !hasHydrated) {
@@ -169,7 +169,7 @@ export function AdminAnimeEditPage({ animeId }: AdminAnimeEditPageProps) {
     return (
       <div className="glass-card p-8">
         <h1 className="text-2xl font-black text-white">Anime not found</h1>
-        <p className="mt-2 text-sm text-white/62">This local item may have been deleted or reset.</p>
+        <p className="mt-2 text-sm text-white/62">This item may have been deleted or reset.</p>
         <Link href="/admin/anime" className="button-primary mt-5">
           Back to anime
         </Link>
@@ -196,7 +196,7 @@ export function AdminAnimeEditPage({ animeId }: AdminAnimeEditPageProps) {
             </p>
             <h1 className="mt-2 text-3xl font-black text-white">{draft.title}</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-white/62">
-              Admin changes are saved locally in this browser. Export JSON to make the cleaned catalog permanent.
+              Changes are saved to the site catalog. Updates may take a moment to appear across devices.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -327,7 +327,7 @@ export function AdminAnimeEditPage({ animeId }: AdminAnimeEditPageProps) {
         <aside className="glass-card h-max space-y-5 p-5 lg:sticky lg:top-24">
           <div>
             <h2 className="text-xl font-black text-white">Publishing</h2>
-            <p className="mt-1 text-sm text-white/58">These flags control public homepage placement after local merge.</p>
+            <p className="mt-1 text-sm text-white/58">These flags control public homepage placement after sync.</p>
           </div>
 
           <div className="grid gap-3">

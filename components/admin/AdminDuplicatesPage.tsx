@@ -11,7 +11,6 @@ import {
   findDuplicateEpisodes,
   normalizeTitle
 } from "@/lib/catalog";
-import type { Anime } from "@/types/anime";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useFullAdminCatalog } from "./useFullAdminCatalog";
 
@@ -48,7 +47,9 @@ export function AdminDuplicatesPage() {
     baseLoaded,
     hasHydrated,
     upsertAnime,
-    deleteAnime
+    deleteAnime,
+    updateEpisode,
+    deleteEpisode
   } = useFullAdminCatalog();
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query, 200);
@@ -102,7 +103,7 @@ export function AdminDuplicatesPage() {
           ...item.anime,
           isHidden: item.anime.id !== keepId ? true : item.anime.isHidden
         },
-        "Duplicate anime visibility updated locally"
+        "Duplicate anime visibility updated"
       );
     }
   }
@@ -110,7 +111,7 @@ export function AdminDuplicatesPage() {
   function deleteAnimeOthers(group: DuplicateGroup<DuplicateAnimeItem>) {
     const keepId = selectedOrFirst(selectedByGroup, group, animeItemId);
 
-    if (!window.confirm("Delete local duplicate anime overrides except the selected item?")) {
+    if (!window.confirm("Delete duplicate anime from the site catalog except the selected item?")) {
       return;
     }
 
@@ -137,32 +138,18 @@ export function AdminDuplicatesPage() {
       return;
     }
 
-    const affectedAnime = new Map<string, Anime>();
-
     for (const item of group.items) {
-      affectedAnime.set(item.anime.id, item.anime);
-    }
+      const itemId = `${item.anime.id}:${item.episode.id}`;
 
-    for (const anime of affectedAnime.values()) {
-      upsertAnime(
-        {
-          ...anime,
-          episodes:
-            mode === "hide"
-              ? anime.episodes.map((episode) =>
-                  group.items.some((item) => item.anime.id === anime.id && item.episode.id === episode.id) &&
-                  `${anime.id}:${episode.id}` !== keepId
-                    ? { ...episode, isHidden: true }
-                    : episode
-                )
-              : anime.episodes.filter(
-                  (episode) =>
-                    `${anime.id}:${episode.id}` === keepId ||
-                    !group.items.some((item) => item.anime.id === anime.id && item.episode.id === episode.id)
-                )
-        },
-        mode === "hide" ? "Duplicate videos hidden locally" : "Duplicate videos deleted locally"
-      );
+      if (itemId === keepId) {
+        continue;
+      }
+
+      if (mode === "hide") {
+        updateEpisode(item.anime.id, item.episode.id, { isHidden: true });
+      } else {
+        deleteEpisode(item.anime.id, item.episode.id);
+      }
     }
   }
 

@@ -70,7 +70,9 @@ export function AdminAnimeListPage() {
     deleteAnime,
     exportCatalog,
     replaceCatalog,
-    resetAdminCatalog
+    resetAdminCatalog,
+    syncCatalog,
+    isSyncing
   } = useFullAdminCatalog();
   const importInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
@@ -186,10 +188,10 @@ export function AdminAnimeListPage() {
       <div className="glass-card p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-cyan">Local Admin</p>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-cyan">Admin Catalog</p>
             <h1 className="mt-2 text-3xl font-black text-white">Anime Catalog</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-white/62">
-              Admin changes are saved locally in this browser. Export JSON to make the cleaned catalog permanent.
+              Changes are saved to the site catalog. Updates may take a moment to appear across devices.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -232,10 +234,14 @@ export function AdminAnimeListPage() {
           <div>
             <h2 className="text-xl font-black text-white">Import / Export</h2>
             <p className="mt-1 text-sm leading-6 text-white/58">
-              Export the merged local catalog as JSON, or import a cleaned catalog back into local overrides.
+              Export the merged site catalog as JSON, import a cleaned catalog, or sync the latest server state.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <button type="button" className="button-secondary" onClick={syncCatalog} disabled={isSyncing}>
+              <RefreshCcw className="h-4 w-4" aria-hidden="true" />
+              {isSyncing ? "Syncing..." : "Sync Catalog"}
+            </button>
             <button type="button" className="button-secondary" onClick={downloadExport}>
               <Download className="h-4 w-4" aria-hidden="true" />
               Export JSON
@@ -248,13 +254,13 @@ export function AdminAnimeListPage() {
               type="button"
               className="button-danger"
               onClick={() => {
-                if (window.confirm("Reset all local admin changes in this browser?")) {
+                if (window.confirm("Reset all site catalog changes?")) {
                   resetAdminCatalog();
                 }
               }}
             >
               <RefreshCcw className="h-4 w-4" aria-hidden="true" />
-              Reset Local
+              Reset Catalog
             </button>
             <input
               ref={importInputRef}
@@ -376,7 +382,7 @@ export function AdminAnimeListPage() {
                         return;
                       }
 
-                      updateAnime(anime.id, { isHidden: !anime.isHidden }, anime.isHidden ? "Anime unhidden locally" : "Anime hidden locally");
+                      updateAnime(anime.id, { isHidden: !anime.isHidden }, anime.isHidden ? "Anime unhidden" : "Anime hidden");
                     }}
                   >
                     {anime.isHidden ? <Eye className="h-4 w-4" aria-hidden="true" /> : <EyeOff className="h-4 w-4" aria-hidden="true" />}
@@ -392,7 +398,7 @@ export function AdminAnimeListPage() {
                           isFeatured: !anime.isFeatured,
                           featuredRank: anime.featuredRank ?? 1
                         },
-                        anime.isFeatured ? "Featured disabled locally" : "Featured enabled locally"
+                        anime.isFeatured ? "Featured disabled" : "Featured enabled"
                       )
                     }
                   >
@@ -409,7 +415,7 @@ export function AdminAnimeListPage() {
                           isTrending: !anime.isTrending,
                           trendingRank: anime.trendingRank ?? 1
                         },
-                        anime.isTrending ? "Trending disabled locally" : "Trending enabled locally"
+                        anime.isTrending ? "Trending disabled" : "Trending enabled"
                       )
                     }
                   >
@@ -427,7 +433,7 @@ export function AdminAnimeListPage() {
                             metadataNeedsReview: false,
                             metadataReviewedAt: new Date().toISOString()
                           },
-                          "Metadata review marked done locally"
+                          "Metadata review marked done"
                         )
                       }
                     >
@@ -439,13 +445,13 @@ export function AdminAnimeListPage() {
                     type="button"
                     className="button-danger px-4 py-2 text-xs"
                     onClick={() => {
-                      if (window.confirm("Delete this anime locally?")) {
+                      if (window.confirm("Delete this anime from the site catalog?")) {
                         deleteAnime(anime.id);
                       }
                     }}
                   >
                     <Trash2 className="h-4 w-4" aria-hidden="true" />
-                    Delete local override
+                    Delete
                   </button>
                 </div>
               </div>
